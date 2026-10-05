@@ -8,3 +8,5 @@ FIGURES = ROOT / "reports" / "figures"
 RANDOM_STATE = 42
 TARGET_CLASSES = (2, 3)   # 2 = tumour area, 3 = healthy area (Kaggle labels)
 N_FOLDS = 5
+
+HOLDOUT_FRAC = 0.2
