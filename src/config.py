@@ -10,3 +10,4 @@ TARGET_CLASSES = (2, 3)   # 2 = tumour area, 3 = healthy area (Kaggle labels)
 N_FOLDS = 5
 
 HOLDOUT_FRAC = 0.2
+SAMPLING_RATE_HZ = 4097 / 23.6  # about 173.6 Hz, implied by Kaggle's description (4097 points in 23.6 s)
