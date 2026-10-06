@@ -1,46 +1,59 @@
 import numpy as np
 import pandas as pd
-from sklearn.metrics import roc_auc_score, confusion_matrix
+from sklearn.metrics import (roc_auc_score, average_precision_score, confusion_matrix,
+                             precision_score, f1_score)
 
 from src.config import N_FOLDS, N_REPEATS
 from src.cv import fold_of_rows
 
-POSITIVE = 2   # class 2 (the affected area) is the "positive" class
 
-
-def out_of_fold_proba(make_model, X, y, rows_fold):
-    """Probability of class 2 for every chunk, from a model that never saw that chunk's segment."""
-    proba = np.empty(len(y))
+def out_of_fold_proba(make_model, X, target, rows_fold):
+    """Probability of the positive class for every chunk, from a model that never saw that chunk's segment."""
+    proba = np.empty(len(target))
     for k in range(N_FOLDS):
         train, val = rows_fold != k, rows_fold == k
-        model = make_model().fit(X[train], y[train])
-        col = list(model.classes_).index(POSITIVE)
+        model = make_model().fit(X[train], target[train])
+        col = list(model.classes_).index(True)
         proba[val] = model.predict_proba(X[val])[:, col]
     return proba
 
 
-def score(dev, proba, rows_fold):
+def score(dev, target, proba, rows_fold, threshold=0.5):
     """Segment-level scores: average each segment's chunk probabilities, then score the segments."""
-    seg = (pd.DataFrame({"segment": dev["segment"].to_numpy(), "y": dev["y"].to_numpy(),
-                         "fold": rows_fold, "p": proba})
-           .groupby("segment").agg(y=("y", "first"), fold=("fold", "first"), p=("p", "mean")))
-    is_pos = (seg["y"] == POSITIVE).to_numpy()
-    pred_pos = (seg["p"] > 0.5).to_numpy()
-    tn, fp, fn, tp = confusion_matrix(is_pos, pred_pos, labels=[False, True]).ravel()
-    chunk_acc = ((proba > 0.5) == (dev["y"].to_numpy() == POSITIVE)).mean()
-    fold_aucs = [roc_auc_score(g["y"] == POSITIVE, g["p"]) for _, g in seg.groupby("fold")
-                 if g["y"].nunique() == 2]                       # ranking inside each fold only
-    return {"auc": roc_auc_score(is_pos, seg["p"]), "auc_fold": float(np.mean(fold_aucs)),
-            "accuracy": (tp + tn) / len(seg),
-            "tp": tp, "fn": fn, "fp": fp, "tn": tn, "chunk_accuracy": chunk_acc}
+    seg = (pd.DataFrame({"segment": dev["segment"].to_numpy(), "target": target, "fold": rows_fold, "p": proba})
+           .groupby("segment").agg(target=("target", "first"), fold=("fold", "first"), p=("p", "mean")))
+    y_true = seg["target"].to_numpy()
+    y_pred = (seg["p"] > threshold).to_numpy()
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[False, True]).ravel()
+    folds = [g for _, g in seg.groupby("fold") if g["target"].nunique() == 2]     # folds that contain both classes
+    sensitivity = tp / (tp + fn)
+    specificity = tn / (tn + fp)
+    return {
+        "auc": roc_auc_score(y_true, seg["p"]),
+        "auc_fold": float(np.mean([roc_auc_score(g["target"], g["p"]) for g in folds])),
+        "pr_auc": average_precision_score(y_true, seg["p"]),
+        "pr_auc_fold": float(np.mean([average_precision_score(g["target"], g["p"]) for g in folds])),
+        "sensitivity": sensitivity,
+        "specificity": specificity,
+        "precision": precision_score(y_true, y_pred, zero_division=0),
+        "f1": f1_score(y_true, y_pred, zero_division=0),
+        "balanced_accuracy": (sensitivity + specificity) / 2,
+        "accuracy": (tp + tn) / len(seg),
+        "tp": tp, "fn": fn, "fp": fp, "tn": tn,
+        "chunk_accuracy": ((proba > threshold) == target).mean(),
+    }
 
 
-def cross_validate(make_model, dev, X, table, n_repeats=N_REPEATS):
-    """Repeated 10-fold CV on segments. One row of scores per repeat."""
-    y = dev["y"].to_numpy()
+def cross_validate(make_model, dev, X, table, n_repeats=N_REPEATS, positive=2, threshold=0.5):
+    """Repeated grouped CV, one row of scores per repeat.
+
+    positive: the class that counts as the positive (1 = seizure; 2 for class 2 vs 3).
+    Everything else in dev counts as negative. Chunk probabilities are averaged per segment.
+    """
+    target = (dev["y"] == positive).to_numpy()
     rows = []
     for r in range(n_repeats):
         rows_fold = fold_of_rows(dev, table, r)
-        proba = out_of_fold_proba(make_model, X, y, rows_fold)
-        rows.append({"repeat": r, **score(dev, proba, rows_fold)})
+        proba = out_of_fold_proba(make_model, X, target, rows_fold)
+        rows.append({"repeat": r, **score(dev, target, proba, rows_fold, threshold)})
     return pd.DataFrame(rows)

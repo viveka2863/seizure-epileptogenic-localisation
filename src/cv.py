@@ -21,9 +21,9 @@ def make_fold_table(dev):
     return table
 
 
-def load_fold_table():
+def load_fold_table(name="cv_folds.csv"):
     """The saved fold table. Always load this instead of re-making it."""
-    return pd.read_csv(SPLITS / "cv_folds.csv")
+    return pd.read_csv(SPLITS / name)
 
 
 def fold_of_rows(dev, table, repeat):
