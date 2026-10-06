@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import StratifiedGroupKFold
 
-from src.config import RAW, TARGET_CLASSES, RANDOM_STATE, HOLDOUT_FRAC
-
+from src.config import RAW, PROCESSED, SPLITS, TARGET_CLASSES, RANDOM_STATE, HOLDOUT_FRAC
 
 def load_raw():
     """Load the Kaggle CSV and split the ID column into chunk and segment."""
@@ -36,3 +36,24 @@ def split_holdout(df, frac=HOLDOUT_FRAC, seed=RANDOM_STATE):
         held += list(rng.choice(segs, size=n, replace=False))
     mask = df["segment"].isin(held)
     return df[~mask].reset_index(drop=True), df[mask].reset_index(drop=True)
+
+
+def split_holdout_by_group(df, group_of, frac=HOLDOUT_FRAC, seed=RANDOM_STATE):
+    """Hold out whole groups of twin segments: about frac of the segments, roughly balanced by class."""
+    seg = df.groupby("segment")["y"].first().reset_index()
+    seg["group"] = seg["segment"].map(group_of)
+    skf = StratifiedGroupKFold(int(round(1 / frac)), shuffle=True, random_state=seed)
+    _, held_idx = next(iter(skf.split(seg["segment"], seg["y"], groups=seg["group"])))
+    held = set(seg["segment"].iloc[held_idx])
+    mask = df["segment"].isin(held)
+    return df[~mask].reset_index(drop=True), df[mask].reset_index(drop=True)
+
+
+def write_processed():
+    """Rebuild data/processed/dev_2v3.csv and holdout_2v3.csv from the raw CSV and the saved hold-out list."""
+    both = load_binary()
+    hold_ids = set(pd.read_csv(SPLITS / "holdout_segments.csv")["segment"])
+    mask = both["segment"].isin(hold_ids)
+    PROCESSED.mkdir(parents=True, exist_ok=True)
+    both[~mask].reset_index(drop=True).to_csv(PROCESSED / "dev_2v3.csv", index=False)
+    both[mask].reset_index(drop=True).to_csv(PROCESSED / "holdout_2v3.csv", index=False)

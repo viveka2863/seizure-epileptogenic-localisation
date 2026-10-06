@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, StratifiedGroupKFold
 
 from src.config import SPLITS, N_FOLDS, N_REPEATS, RANDOM_STATE
 
@@ -29,3 +29,16 @@ def load_fold_table():
 def fold_of_rows(dev, table, repeat):
     """Fold number of every chunk row, taken from its segment's fold."""
     return dev["segment"].map(table.set_index("segment")[f"repeat_{repeat}"]).to_numpy()
+
+
+def make_group_fold_table(dev, group_of):
+    """Like make_fold_table, but whole groups of twin segments always sit in the same fold."""
+    table = dev.groupby("segment")["y"].first().reset_index()
+    table["group"] = table["segment"].map(group_of)
+    for r in range(N_REPEATS):
+        skf = StratifiedGroupKFold(N_FOLDS, shuffle=True, random_state=RANDOM_STATE + r)
+        fold = np.empty(len(table), dtype=int)
+        for k, (_, val_idx) in enumerate(skf.split(table["segment"], table["y"], groups=table["group"])):
+            fold[val_idx] = k
+        table[f"repeat_{r}"] = fold
+    return table

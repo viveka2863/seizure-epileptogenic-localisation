@@ -14,3 +14,6 @@ N_REPEATS = 5             # Repeats when comparing models
 
 HOLDOUT_FRAC = 0.2
 SAMPLING_RATE_HZ = 4097 / 23.6  # about 173.6 Hz, implied by Kaggle's description (4097 points in 23.6 s)
+
+SIMILARITY_STRONG = 0.7   # any two segments more similar than this are always kept together
+SIMILARITY_WEAK = 0.4     # segments in a tight cluster (every pair above this) are kept together too
