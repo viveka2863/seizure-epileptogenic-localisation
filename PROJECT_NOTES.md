@@ -7,13 +7,13 @@ Kaggle's "Epileptic Seizure Recognition" has 500 EEG segments in five classes. I
 
 ## How the leak was found
 - The CSV has 11,500 rows. They are not independent: each segment is 23 one-second chunks, and chunks from the same segment are obviously related. So I split by segment, not by row.
-- Even then, scores looked too good: AUC 0.8 to 0.9 for a problem that should be hard. A plain forest on raw values should not do that.
-- Looking at the data, some segments are near-copies of each other: the same recording under different IDs. A pair plotted on top of each other lines up almost perfectly (figure 06). About 44% of the class 2 and 3 segments had a partner above 0.8 correlation.
+- Even then, scores were high (AUC 0.8 to 0.9) for a problem that should be hard, which made me look at the data again.
+- Some segments are near-copies of each other: the same recording under different IDs. A pair plotted on top of each other lines up almost perfectly (figure 06). About 44% of the class 2 and 3 segments had a partner above 0.8 correlation.
 - Twins were always the same class. So a twin in training tells the model the answer for its partner in validation. That is leakage, even with segment-level splits.
 - Fix: group twins and split by whole groups. With that, the same models fell from 0.8 to 0.9 down to 0.3 to 0.64, and my shuffled-label runs showed that this is inside the range of pure chance (0.32 to 0.60).
 
 ## Decisions and why
-- **Twin rule.** Link two segments if similarity is above 0.7, or if they sit in a tight cluster where every pair is above 0.4. I chose thresholds where the leftover validation/training similarity was clearly lower than the twin level (about 0.64), not by trial and error on scores. Later I tested stricter thresholds.
+- **Twin rule.** Link two segments if similarity is above 0.7, or if they sit in a tight cluster where every pair is above 0.4. After grouping, the most similar validation/training pair is about 0.64, well below the twin level. Later I tested stricter thresholds.
 - **Shuffled-label range.** Instead of just saying "0.64 vs 0.5", I shuffled labels between whole groups 30 times to see what luck looks like. Chance is not a single number on a small dataset: it is 0.32 to 0.60.
 - **Noise yardstick.** Re-making the folds moves scores by about 0.03. So differences under 0.03 are ties, and ties go to the simpler model. I fixed this rule before looking at the model comparisons.
 - **Hold-out locked.** 100 segments set aside as whole groups, never used until the last step.
