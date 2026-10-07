@@ -1,9 +1,10 @@
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold
 from sklearn.metrics import (roc_auc_score, average_precision_score, confusion_matrix,
                              precision_score, f1_score)
 
-from src.config import N_FOLDS, N_REPEATS
+from src.config import N_FOLDS, N_INNER_FOLDS, N_REPEATS, RANDOM_STATE
 from src.cv import fold_of_rows
 
 
@@ -87,3 +88,38 @@ def cross_validate_segments(make_model, data, feature_cols, table, n_repeats=N_R
             p[val] = model.predict_proba(X[val])[:, list(model.classes_).index(True)]
         rows.append({"repeat": r, **metrics_from_segments(target, p, fold, threshold)})
     return pd.DataFrame(rows)
+
+# ---- nested tuning: settings are chosen inside each outer training set, using twin-group-aware inner folds ----
+
+def cross_validate_segments_tuned(make_model, param_grid, data, feature_cols, table, n_repeats=3, positive=1,
+                                  threshold=0.5, n_jobs=-1):
+    """Like cross_validate_segments, but the model settings are tuned inside every outer training set.
+
+    Outer loop: the saved folds. Inner loop: StratifiedGroupKFold on the outer-training segments, using
+    data["group"], scored by ROC-AUC. The grid search refits the best setting on the whole outer-training set.
+    param_grid: {parameter name: list of values}; an empty dict means no tuning (plain fit).
+    Returns (scores per repeat, chosen settings per outer fold).
+    """
+    X = data[feature_cols].to_numpy(dtype=float)
+    target = (data["y"] == positive).to_numpy()
+    group = data["group"].to_numpy()
+    fold_lookup = table.set_index("segment")
+    rows, chosen = [], []
+    for r in range(n_repeats):
+        fold = data["segment"].map(fold_lookup[f"repeat_{r}"]).to_numpy()
+        p = np.full(len(data), np.nan)
+        for k in range(N_FOLDS):
+            train, val = fold != k, fold == k
+            if not val.any():
+                continue
+            if param_grid:
+                inner = StratifiedGroupKFold(N_INNER_FOLDS, shuffle=True, random_state=RANDOM_STATE + 100 * r + k)
+                inner_folds = list(inner.split(X[train], target[train], groups=group[train]))      # explicit, group-aware
+                model = GridSearchCV(make_model(), param_grid, scoring="roc_auc", cv=inner_folds, n_jobs=n_jobs, refit=True)
+                model.fit(X[train], target[train])
+                chosen.append({"repeat": r, "fold": k, **model.best_params_})
+            else:
+                model = make_model().fit(X[train], target[train])
+            p[val] = model.predict_proba(X[val])[:, list(model.classes_).index(True)]
+        rows.append({"repeat": r, **metrics_from_segments(target, p, fold, threshold)})
+    return pd.DataFrame(rows), pd.DataFrame(chosen)
