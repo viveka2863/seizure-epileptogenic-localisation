@@ -135,7 +135,7 @@ cd seizure-epileptogenic-localisation
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 # download the CSV from Kaggle into data/raw/ ("Epileptic Seizure Recognition.csv")
-python -c "from src.data import write_processed, write_processed_seizure; write_processed(); write_processed_seizure()"
+python -c "from src.data import write_processed, write_processed_allclass; write_processed(); write_processed_allclass()"
 python -c "from src.features import build_feature_tables; build_feature_tables()"
 jupyter lab        # run notebooks 02, then 06 to 17 in order
 ```

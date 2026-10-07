@@ -59,11 +59,11 @@ def write_processed():
     both[mask].reset_index(drop=True).to_csv(PROCESSED / "holdout_2v3.csv", index=False)
 
 
-def write_processed_seizure():
-    """Rebuild data/processed/dev_seizure.csv and holdout_seizure.csv (all five classes) from the raw CSV and the saved hold-out list."""
+def write_processed_allclass():
+    """Rebuild data/processed/dev_allclass.csv and holdout_allclass.csv (all five classes) from the raw CSV and the saved hold-out list."""
     both = load_raw()
-    hold_ids = set(pd.read_csv(SPLITS / "holdout_segments_seizure.csv")["segment"])
+    hold_ids = set(pd.read_csv(SPLITS / "holdout_segments_allclass.csv")["segment"])
     mask = both["segment"].isin(hold_ids)
     PROCESSED.mkdir(parents=True, exist_ok=True)
-    both[~mask].reset_index(drop=True).to_csv(PROCESSED / "dev_seizure.csv", index=False)
-    both[mask].reset_index(drop=True).to_csv(PROCESSED / "holdout_seizure.csv", index=False)
+    both[~mask].reset_index(drop=True).to_csv(PROCESSED / "dev_allclass.csv", index=False)
+    both[mask].reset_index(drop=True).to_csv(PROCESSED / "holdout_allclass.csv", index=False)

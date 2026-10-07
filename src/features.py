@@ -78,7 +78,7 @@ def build_feature_tables():
     feats.insert(1, "y", df.groupby("segment")["y"].first().loc[names].to_numpy())
     groups = pd.read_csv(SPLITS / "groups_all.csv").set_index("segment")["group"]
     feats.insert(2, "group", groups.loc[names].to_numpy())
-    hold_ids = set(pd.read_csv(SPLITS / "holdout_segments_seizure.csv")["segment"])
+    hold_ids = set(pd.read_csv(SPLITS / "holdout_segments_allclass.csv")["segment"])
     is_hold = feats["segment"].isin(hold_ids)
     PROCESSED.mkdir(parents=True, exist_ok=True)
     dev, hold = feats[~is_hold].reset_index(drop=True), feats[is_hold].reset_index(drop=True)
