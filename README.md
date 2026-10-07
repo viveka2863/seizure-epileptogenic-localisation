@@ -192,9 +192,6 @@ The saved splits in `splits/` are the ones behind every reported number. Noteboo
 - The clips are not continuous EEG. Each segment is a short excerpt, so nothing here is about detecting seizure onset in a live recording.
 - Gradient boosting and the SVM's probability calibration used defaults.
 
-## How this was built
-I worked with Claude (Anthropic) as a tutor and coding assistant, and used Claude Code for the final cleanup, re-runs and write-up. I ran the notebooks and checked the numbers in this README against their outputs.
-
 ## Data and attribution
 - Data: not included. Get it from Kaggle ("Epileptic Seizure Recognition") and follow the terms on its page. It is a reshaped copy of the dataset from: Andrzejak RG, Lehnertz K, Mormann F, Rieke C, David P, Elger CE (2001). Indications of nonlinear deterministic and finite-dimensional structures in time series of brain electrical activity: dependence on recording region and brain state. Physical Review E 64, 061907.
 
