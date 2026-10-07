@@ -1,41 +1,44 @@
 # Seizure EEG: finding a leak in my own evaluation
 
 **In short**
-- Task: classify 1-second EEG chunks from Kaggle's "Epileptic Seizure Recognition" as class 2 ("tumour area") or class 3 ("healthy area"), using Kaggle's labels.
-- Main finding, about evaluation: many segments are near-copies of each other (the same recording, at the same time). Splitting by segment let a segment's twin sit in training while it was tested, which inflated AUC from about 0.6 to 0.8-0.9.
-- With twin-aware evaluation, no model is clearly better than chance for class 2 vs 3. The best AUC is about 0.64, against a chance range of 0.32 to 0.60.
-- Next: seizure detection (class 1 vs the rest). The effect is large there and survives the corrected evaluation.
+- Data: Kaggle's "Epileptic Seizure Recognition" (500 EEG segments in five classes). I use Kaggle's labels; the file cannot verify what they mean.
+- Main finding, about evaluation: many segments are near-copies of each other (the same recording filed under different IDs). Plain segment folds let a twin sit in training while its partner was tested, which inflated AUC from about 0.6 to 0.8-0.9. Splitting by whole twin groups fixes it.
+- Seizure vs the rest is easy (AUC 0.997 from signal amplitude alone). Seizure vs Kaggle's classes 2 and 3 is easy too.
+- Class 2 vs 3 (Kaggle: "tumour area" vs "healthy area") is near chance with chunk-level models, but above chance with whole-segment features: AUC about 0.75 to 0.78, and no model is clearly better than logistic regression. This is **not** evidence that anything detects tumours or works on new patients. See Limitations.
 
 ## Data
 - Source: Kaggle "Epileptic Seizure Recognition" (a reshaped copy of a published EEG dataset; see the Kaggle page for the citation). Download it into `data/raw/`; it is not stored in this repo.
-- 11,500 rows = 500 **segments** x 23 one-second **chunks** (178 samples each). The ID column (`X<chunk>.<segment>`) identifies the chunk and the segment. Chunk numbers give the time order within a segment.
-- Classes 2 and 3 are 200 segments (100 each).
-- The CSV has no patient ID, so overlap between patients cannot be ruled out. Kaggle describes 500 individuals; what the file itself supports is 500 segments.
+- 11,500 rows = 500 **segments** x 23 one-second **chunks** (178 samples each, about 173.6 Hz). The ID column (`X<chunk>.<segment>`) gives the chunk and the segment. Chunk numbers give the time order within a segment.
+- Five classes, 100 segments each. Class 1 is seizure. Kaggle labels class 2 "tumour area" and class 3 "healthy area"; both are depth-electrode recordings. Classes 4 and 5 are scalp recordings (eyes closed / eyes open).
+- There is no patient ID, so overlap between patients cannot be ruled out. What the file supports is 500 segments, not a number of people.
+- Almost no power above 40 Hz, with a narrow 50 Hz mains line. Seizure chunks are about 6x larger in amplitude.
 
 ## Evaluation design
 ```mermaid
 flowchart LR
     A["Kaggle CSV<br/>11,500 rows"] --> B["500 segments<br/>23 chunks each"]
     B --> C["Find near-copy segments<br/>group the twins"]
-    C --> D["Hold-out: 40 segments<br/>locked until the end"]
-    C --> E["Development: 160 segments"]
+    C --> D["Hold-out: 100 segments<br/>(40 of them classes 2 and 3)<br/>locked until the end"]
+    C --> E["Development: 400 segments<br/>(160 of them classes 2 and 3)"]
     E --> F["10 folds of whole groups<br/>x 5 repeats"]
-    F --> G["Score per segment<br/>(mean of its 23 chunk probabilities)"]
+    F --> G["Score per segment<br/>(chunk models: mean of its 23 chunk probabilities)"]
 ```
-- One prediction per segment: its 23 chunk probabilities are averaged.
-- Headline metric: ROC-AUC, as the mean of per-fold AUCs. Accuracy and a confusion matrix are reported beside it.
-- Every model uses the same saved folds (`splits/`). Anything learned from data (scalers, models) is fitted on the training fold only.
+- One prediction per segment. Headline metric: ROC-AUC, as the mean of per-fold AUCs.
+- The final split (notebook 08) covers all five classes: 500 segments make 330 twin groups; the hold-out is 100 segments (20 per class, 66 groups); development is 400 segments, folds stratified by the five-class label. All models use the same saved folds in `splits/`.
+- Anything learned from data (scaling, feature selection, resampling, tuning) happens inside the training fold. Tuning uses inner folds that also keep twin groups together.
+- Re-making folds moves scores by up to about 0.03. I treat differences below 0.03 as ties, and a tie goes to the simpler model. A model beats another only if its mean AUC is more than 0.03 higher and it wins in every repeat.
+- The shuffled-label range is what a model with no signal scores on the same folds (labels shuffled between whole twin groups).
 
 ## The leak
 Segments that are the same recording sit under different IDs:
 
 ![A twin pair against an unrelated pair](reports/figures/06_twin_pair.png)
 
-- 44% of segments have a partner with mean aligned correlation above 0.8, and 22% above 0.9.
+- 44% of class 2 and 3 segments have a partner with mean aligned correlation above 0.8, and 22% above 0.9.
 - Strong twins are always the same class, so a twin in training gives away the label of a validation segment.
-- Fix: group twins (above 0.7 similarity, or in a tight cluster where every pair is above 0.4) and split by whole groups. 200 segments form 94 groups. After the fix, the most similar hold-out/dev pair is 0.67 and the most similar validation/training pair is 0.65.
+- Fix: link segments above 0.7 similarity, or in a tight cluster where every pair is above 0.4, and split by whole groups.
 
-Same data and models, only the folds differ:
+Same data and models, only the folds differ (chunk-level, classes 2 vs 3, notebook 07):
 
 ![AUC with plain segment folds vs twin-group folds](reports/figures/07_leak_effect.png)
 
@@ -47,18 +50,83 @@ Same data and models, only the folds differ:
 | KNN (k=25), level and spread removed | 0.87 | 0.63 |
 | Logistic regression, relative log spectrum | 0.75 | 0.64 |
 
-The grey band is the range of AUC you get with shuffled labels on the same folds (0.32 to 0.60).
+The shuffled-label range on the same folds is 0.32 to 0.60. Chance is 0.50.
 
-## Notebooks
-| Notebook | What it does | Status |
+## Results by part
+
+### 1. Seizure vs the rest (notebooks 09, 17)
+Chunk-level logistic regression, 400 development segments, 20% seizure.
+
+| Model | AUC | PR-AUC | Sensitivity | Specificity | Accuracy |
+|---|---|---|---|---|---|
+| Chance | 0.500 | 0.200 | 0 | 1 | 0.800 |
+| Log amplitude (one number) | 0.997 | 0.991 | 0.865 | 0.991 | 0.965 |
+| Amplitude, kurtosis, line length | 0.996 | 0.988 | 0.838 | 0.991 | 0.960 |
+
+- Amplitude alone does the job. More features add nothing, and accuracy is misleading (chance gets 0.80).
+- The ranking is near perfect; the weak point is the 0.5 cut-off. About 10 of 80 seizure segments are missed. They are small seizures (median chunk amplitude 112, against 294 for caught seizures and 45 for non-seizure).
+- Class weights, random oversampling and SMOTE (done inside the training folds) all leave AUC unchanged and move sensitivity / specificity to about 0.975 / 0.976. A lower cut-off makes the same trade: 0.3 gives 0.95 / 0.978, 0.1 gives 1.0 / 0.922 (one repeat, descriptive only).
+
+### 2. Seizure vs Kaggle's classes 2 and 3 (notebooks 10, 11)
+23 features per reconstructed segment (8 about size, 15 about shape; `src/features.py`). 240 development segments.
+
+| | Logistic | Forest |
 |---|---|---|
-| 01 audit | Checks the data structure, makes the first split | Superseded (halts on purpose) |
-| 02 EDA | Simple segment-level measures do not separate the classes | Valid |
-| 03 splits | Folds by segment | Superseded |
-| 04 baselines | First models | Scores inflated by the leak |
-| 05 ablation | What the forest relied on | Interpretation superseded: it was matching twins |
-| 06 duplicates | Finds twins, regroups the hold-out and folds | The fix |
-| 07 honest baselines | Models on the corrected folds, with a chance range | Current |
+| All 23 features | 0.997 | 0.999 |
+| Size only | 0.996 | 0.996 |
+| Shape only | 0.994 | 0.993 |
+
+Shuffled-label range: 0.35 to 0.59. It is easy even without amplitude.
+
+![Features by class](reports/figures/10_features_by_class.png)
+
+### 3. Class 2 vs 3 (notebooks 12 to 16)
+160 development segments, 76 twin groups.
+
+**Signal (12).** AUC with segment features, chance 0.500:
+
+| | Logistic | Forest |
+|---|---|---|
+| All 23 | 0.708 | 0.770 |
+| Size only | 0.664 | 0.738 |
+| Shape only | 0.749 | 0.779 |
+
+Shuffled-label ranges top out at 0.62 to 0.66, so shape features are above them; logistic on all 23 (0.708) is only just above its range (0.64). It is a modest signal.
+
+**Stress tests (13).**
+- Stricter grouping (0.6/0.3 and 0.5/0.2 thresholds, new folds): scores fall by 0.02 to 0.04 and stay above chance (e.g. logistic shape 0.761, 0.737, 0.742).
+- Negative control (mains and noise-floor power only): 0.386 logistic, 0.528 forest. Nothing there.
+- 40 Hz low-pass, features recomputed: logistic shape 0.762, forest shape 0.794. Little changes.
+
+**Models (14, 15).** On the 15 shape features: logistic 0.749, SVM 0.793, forest 0.779, gradient boosting 0.712. The SVM's lead looked real on the saved folds (+0.044, 5 of 5 repeats) but did not replicate on three fresh fold sets (+0.019, +0.012, +0.011). With nested tuning (inner twin-grouped folds, 3 repeats) no tuned model beats tuned logistic (SVM +0.010, forest -0.006), and tuning does not beat defaults. Gradient boosting is clearly worse. **Logistic regression stays.** Single-feature scores are low except `hjorth_complexity` (0.697); picking the best k features does not beat using all 23.
+
+**Final checks (16), run once on the hold-out.**
+
+| | Class 2 vs 3 (not clean) | Seizure vs classes 2 and 3 |
+|---|---|---|
+| Hold-out segments (groups) | 40 (18) | 60 (32) |
+| AUC (95% interval, group bootstrap) | 0.883 (0.771 to 1.000) | 0.988 (0.952 to 1.000) |
+| Sensitivity / specificity at 0.5 | 0.70 / 0.95 | 0.90 / 0.925 |
+
+The class 2 vs 3 check is **not clean**: those 40 segments were part of the earlier chunk-level development. It also came out higher than in development (about 0.75). With 40 segments and a wide interval I read it as "above chance, size uncertain", not as a better model.
+
+## Notebook map
+| Notebook | What it does |
+|---|---|
+| 02 EDA | Simple segment-level measures do not separate classes 2 and 3 |
+| 06 duplicates | Finds twins, regroups the original class 2/3 split |
+| 07 honest baselines | Chunk-level models on twin-group folds vs plain folds, with a shuffled-label range |
+| 08 seizure splits | All-class twin groups, hold-out and folds (the splits used from here on) |
+| 09 seizure baselines | Seizure vs the rest, chunk-level |
+| 10 features | 23 segment features and sanity checks |
+| 11 seizure vs depth | Seizure vs classes 2 and 3 |
+| 12 two vs three: signal | Class 2 vs 3 grid and shuffled-label ranges |
+| 13 two vs three: robustness | Stricter grouping, negative control, low-pass |
+| 14 two vs three: models | Single features, feature-count curve, four models, replication on fresh folds |
+| 15 two vs three: tuned | Nested tuning |
+| 16 final checks | One-shot hold-out check |
+| 17 seizure imbalance | Class weights, oversampling, SMOTE, cut-off sweep |
+| `archive/` 01, 03, 04, 05 | Record of the first, superseded run (plain segment folds; scores inflated by the leak; 01 halts on purpose) |
 
 ## Reproduce
 ```bash
@@ -66,17 +134,21 @@ git clone https://github.com/viveka2863/seizure-epileptogenic-localisation.git
 cd seizure-epileptogenic-localisation
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-# download the CSV from Kaggle into data/raw/
-python -c "from src.data import write_processed; write_processed()"
-jupyter lab        # run notebooks 02, 06 and 07
-# Notebooks 04 and 05 are kept as a record of the superseded run. Notebook 06 re-derives the splits; the committed files in `splits/` are the ones behind the reported results.
+# download the CSV from Kaggle into data/raw/ ("Epileptic Seizure Recognition.csv")
+python -c "from src.data import write_processed, write_processed_seizure; write_processed(); write_processed_seizure()"
+python -c "from src.features import build_feature_tables; build_feature_tables()"
+jupyter lab        # run notebooks 02, then 06 to 17 in order
 ```
+The saved splits in `splits/` are the ones behind every reported number. Notebooks 06 and 08 never overwrite them. Seeds are fixed; re-running reproduces the numbers above (SVM and forest may differ in the third decimal with other library versions). Raw and processed data are not committed. Notebook 16 reads the hold-out; run it once.
 
 ## Limitations
-- Similarity between segments is graded, so weaker twins below the thresholds may remain. Scores should be read as upper bounds.
-- The hold-out has only 18 groups, so it can only confirm a large effect.
-- No patient ID, so patient-level overlap is untested.
-- Differences below about 0.05 AUC are within noise.
+- No patient ID, so a model may be recognising a person or recording site it has already seen. This cannot be tested here and could explain part of the class 2 vs 3 result. Nothing here says anything about tumours or new patients, and none of it is clinical.
+- Twin grouping uses thresholds. Weaker similarity below them may remain, so all scores are upper bounds.
+- Hold-outs are small (40 and 60 segments, 20 positives each), so they only confirm large effects.
+- Chunk-level vs whole-segment: the chunk-level and segment-level results are different questions, and the segment features need all 23 chunks.
+- The clips are not continuous EEG. Each segment is a short excerpt, so nothing here is about detecting seizure onset in a live recording.
+- Gradient boosting and the SVM's probability calibration used defaults.
 
-## Next
-Seizure detection (class 1 vs the rest), where the effect should be much larger. It will be tested with the same twin-aware evaluation.
+## Future work
+- More feature families (catch22, MiniROCKET) and boosting libraries (XGBoost, LightGBM), compared under the same rule.
+- Patient-level validation, which needs a dataset with patient IDs.
