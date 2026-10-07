@@ -1,16 +1,41 @@
 # Seizure EEG: finding a leak in my own evaluation
 
+**In plain words.** Some of the EEG recordings in this dataset are filed twice under different IDs. If one copy ends up in training and the other in testing, a model looks far better than it is. This project finds those copies, builds splits that keep them together, and then asks three questions with honest scoring.
+
+![Results at a glance](reports/figures/results_at_a_glance.png)
+
 **In short**
 - Data: Kaggle's "Epileptic Seizure Recognition" (500 EEG segments in five classes). I use Kaggle's labels; the file cannot verify what they mean.
-- Main finding, about evaluation: many segments are near-copies of each other (the same recording filed under different IDs). Plain segment folds let a twin sit in training while its partner was tested, which inflated AUC from about 0.6 to 0.8-0.9. Splitting by whole twin groups fixes it.
-- Seizure vs the rest is easy (AUC 0.997 from signal amplitude alone). Seizure vs Kaggle's classes 2 and 3 is easy too.
-- Class 2 vs 3 (Kaggle: "tumour area" vs "healthy area") is near chance with chunk-level models, but above chance with whole-segment features: AUC about 0.75 to 0.78, and no model is clearly better than logistic regression. This is **not** evidence that anything detects tumours or works on new patients. See Limitations.
+- Main finding, about evaluation: many segments are near-copies of each other. Plain segment splits let a twin sit in training while its partner was tested, which inflated AUC from about 0.6 to 0.8-0.9. Splitting by whole twin groups fixes it.
+- Seizure vs the rest is easy (AUC 0.997 from signal amplitude alone). Seizure vs Kaggle's classes 2 and 3 is easy too, even without amplitude.
+- Class 2 vs 3 (Kaggle: "tumour area" vs "healthy area") is near chance with chunk-level models, but above chance with whole-segment features: AUC about 0.70 to 0.79 depending on features and model, and no model is clearly better than logistic regression. This is **not** evidence that anything detects tumours or works on new patients. See Limitations.
+
+## Words used here
+| Word | Meaning |
+|---|---|
+| Segment / chunk | A recording is a segment of 23.6 seconds, stored as 23 one-second chunks |
+| Twins | Two segments that are the same recording filed under different IDs |
+| Fold | One slice of the data held back for testing while the model trains on the rest |
+| Hold-out | Segments locked away until the very end, used once |
+| AUC | How well a model ranks the positive class above the negative one. 1.0 is perfect, 0.5 is a coin flip |
+| Shuffled-label range | The scores a model gets by luck when the labels are randomly shuffled. Anything inside it is not evidence of signal |
+
+## The project in one picture
+```mermaid
+flowchart TD
+    A["The leak<br/>near-copy segments inflate scores"] --> B["Fix: split by whole twin groups<br/>(notebooks 06 to 08)"]
+    B --> C["Part 1: seizure vs the rest<br/>easy, amplitude is enough"]
+    B --> D["Part 2: seizure vs classes 2 and 3<br/>easy, even without amplitude"]
+    B --> E["Part 3: class 2 vs 3<br/>modest signal, models tie"]
+    E --> F["Stress tests<br/>stricter grouping, noise control, 40 Hz low-pass"]
+    E --> G["Model comparison<br/>the SVM lead did not replicate"]
+```
 
 ## Data
-- Source: Kaggle "Epileptic Seizure Recognition" (a reshaped copy of a published EEG dataset; see the Kaggle page for the citation). Download it into `data/raw/`; it is not stored in this repo.
+- Source: Kaggle "Epileptic Seizure Recognition", a reshaped copy of the dataset from Andrzejak et al. (2001) (full citation under Licence and data). Download it into `data/raw/`; it is not stored in this repo.
 - 11,500 rows = 500 **segments** x 23 one-second **chunks** (178 samples each, about 173.6 Hz). The ID column (`X<chunk>.<segment>`) gives the chunk and the segment. Chunk numbers give the time order within a segment.
 - Five classes, 100 segments each. Class 1 is seizure. Kaggle labels class 2 "tumour area" and class 3 "healthy area"; both are depth-electrode recordings. Classes 4 and 5 are scalp recordings (eyes closed / eyes open).
-- There is no patient ID, so overlap between patients cannot be ruled out. What the file supports is 500 segments, not a number of people.
+- There is no patient ID. The original publication describes a handful of people (five patients and five healthy volunteers), not 500, so many segments probably come from the same few people. What the file itself supports is 500 segments.
 - Almost no power above 40 Hz, with a narrow 50 Hz mains line. Seizure chunks are about 6x larger in amplitude.
 
 ## Evaluation design
@@ -30,7 +55,11 @@ flowchart LR
 - The shuffled-label range is what a model with no signal scores on the same folds (labels shuffled between whole twin groups).
 
 ## The leak
-Segments that are the same recording sit under different IDs:
+Segments that are the same recording sit under different IDs. If a twin is in training, the model has already seen the answer:
+
+![Plain split vs split by twin group](reports/figures/leak_in_one_picture.png)
+
+A real twin pair, against an unrelated pair:
 
 ![A twin pair against an unrelated pair](reports/figures/06_twin_pair.png)
 
@@ -64,8 +93,8 @@ Chunk-level logistic regression, 400 development segments, 20% seizure.
 | Amplitude, kurtosis, line length | 0.996 | 0.988 | 0.838 | 0.991 | 0.960 |
 
 - Amplitude alone does the job. More features add nothing, and accuracy is misleading (chance gets 0.80).
-- The ranking is near perfect; the weak point is the 0.5 cut-off. About 10 of 80 seizure segments are missed. They are small seizures (median chunk amplitude 112, against 294 for caught seizures and 45 for non-seizure).
-- Class weights, random oversampling and SMOTE (done inside the training folds) all leave AUC unchanged and move sensitivity / specificity to about 0.975 / 0.976. A lower cut-off makes the same trade: 0.3 gives 0.95 / 0.978, 0.1 gives 1.0 / 0.922 (one repeat, descriptive only).
+- The ranking is near perfect; the weak point is the 0.5 cut-off. About 10 of 80 seizure segments are missed. They are quieter seizures (median chunk amplitude 112, against 294 for caught seizures and 45 for non-seizure).
+- Class weights, random oversampling and SMOTE (done inside the training folds) all leave AUC unchanged and, for the one-number model, move sensitivity / specificity to about 0.975 / 0.976. A lower cut-off makes the same trade: 0.3 gives 0.95 / 0.978, 0.1 gives 1.0 / 0.922 (one repeat, descriptive only).
 
 ### 2. Seizure vs Kaggle's classes 2 and 3 (notebooks 10, 11)
 23 features per reconstructed segment (8 about size, 15 about shape; `src/features.py`). 240 development segments.
@@ -91,14 +120,18 @@ Shuffled-label range: 0.35 to 0.59. It is easy even without amplitude.
 | Size only | 0.664 | 0.738 |
 | Shape only | 0.749 | 0.779 |
 
-Shuffled-label ranges top out at 0.62 to 0.66, so shape features are above them; logistic on all 23 (0.708) is only just above its range (0.64). It is a modest signal.
+Shuffled-label ranges top out at 0.62 to 0.66, so these are above them. Logistic on all 23 (0.708) is above its range (0.64) by about 0.07: a modest signal.
 
 **Stress tests (13).**
 - Stricter grouping (0.6/0.3 and 0.5/0.2 thresholds, new folds): scores fall by 0.02 to 0.04 and stay above chance (e.g. logistic shape 0.761, 0.737, 0.742).
 - Negative control (mains and noise-floor power only): 0.386 logistic, 0.528 forest. Nothing there.
 - 40 Hz low-pass, features recomputed: logistic shape 0.762, forest shape 0.794. Little changes.
 
-**Models (14, 15).** On the 15 shape features: logistic 0.749, SVM 0.793, forest 0.779, gradient boosting 0.712. The SVM's lead looked real on the saved folds (+0.044, 5 of 5 repeats) but did not replicate on three fresh fold sets (+0.019, +0.012, +0.011). With nested tuning (inner twin-grouped folds, 3 repeats) no tuned model beats tuned logistic (SVM +0.010, forest -0.006), and tuning does not beat defaults. Gradient boosting is clearly worse. **Logistic regression stays.** Single-feature scores are low except `hjorth_complexity` (0.697); picking the best k features does not beat using all 23.
+**Models (14, 15).** On the 15 shape features: logistic 0.749, SVM 0.793, forest 0.779, gradient boosting 0.712. The SVM's lead looked real on the saved folds (+0.044, 5 of 5 repeats) but did not replicate on three fresh fold sets:
+
+![The SVM's lead did not replicate](reports/figures/svm_lead_vanished.png)
+
+With nested tuning (inner twin-grouped folds, 3 repeats) no tuned model beats tuned logistic (SVM +0.010, forest -0.006), and tuning does not beat defaults. Gradient boosting is clearly worse. **Logistic regression stays.** Single-feature scores are low except `hjorth_complexity` (0.697); picking the best k features does not beat using all 23.
 
 **Final checks (16), run once on the hold-out.**
 
@@ -109,6 +142,13 @@ Shuffled-label ranges top out at 0.62 to 0.66, so shape features are above them;
 | Sensitivity / specificity at 0.5 | 0.70 / 0.95 | 0.90 / 0.925 |
 
 The class 2 vs 3 check is **not clean**: those 40 segments were part of the earlier chunk-level development. It also came out higher than in development (about 0.75). With 40 segments and a wide interval I read it as "above chance, size uncertain", not as a better model.
+
+### What this does and does not show
+| It shows | It does not show |
+|---|---|
+| Plain folds inflate AUC by 0.11 to 0.32 when twins leak, and grouping fixes it | That any model beats logistic regression on class 2 vs 3 |
+| Seizure vs the rest is easy, and amplitude is enough | That anything detects tumours, or works on new patients |
+| Class 2 vs 3 is above chance on whole-segment features and survives three stress tests | That the patient-overlap question is settled |
 
 ## Notebook map
 | Notebook | What it does |
@@ -128,6 +168,8 @@ The class 2 vs 3 check is **not clean**: those 40 segments were part of the earl
 | 17 seizure imbalance | Class weights, oversampling, SMOTE, cut-off sweep |
 | `archive/` 01, 03, 04, 05 | Record of the first, superseded run (plain segment folds; scores inflated by the leak; 01 halts on purpose) |
 
+The reasoning behind each step is in [PROJECT_NOTES.md](PROJECT_NOTES.md).
+
 ## Reproduce
 ```bash
 git clone https://github.com/viveka2863/seizure-epileptogenic-localisation.git
@@ -138,6 +180,7 @@ pip install -r requirements.txt
 python -c "from src.data import write_processed, write_processed_allclass; write_processed(); write_processed_allclass()"
 python -c "from src.features import build_feature_tables; build_feature_tables()"
 jupyter lab        # run notebooks 02, then 06 to 17 in order
+python reports/make_summary_figures.py    # redraws the three summary figures (numbers are copied from the notebooks)
 ```
 The saved splits in `splits/` are the ones behind every reported number. Notebooks 06 and 08 never overwrite them. Seeds are fixed; re-running reproduces the numbers above (SVM and forest may differ in the third decimal with other library versions). Raw and processed data are not committed. Notebook 16 reads the hold-out; run it once.
 
@@ -145,9 +188,15 @@ The saved splits in `splits/` are the ones behind every reported number. Noteboo
 - No patient ID, so a model may be recognising a person or recording site it has already seen. This cannot be tested here and could explain part of the class 2 vs 3 result. Nothing here says anything about tumours or new patients, and none of it is clinical.
 - Twin grouping uses thresholds. Weaker similarity below them may remain, so all scores are upper bounds.
 - Hold-outs are small (40 and 60 segments, 20 positives each), so they only confirm large effects.
-- Chunk-level vs whole-segment: the chunk-level and segment-level results are different questions, and the segment features need all 23 chunks.
+- The chunk-level and whole-segment results answer different questions, and the segment features need all 23 chunks.
 - The clips are not continuous EEG. Each segment is a short excerpt, so nothing here is about detecting seizure onset in a live recording.
 - Gradient boosting and the SVM's probability calibration used defaults.
+
+## How this was built
+I worked with Claude (Anthropic) as a tutor and coding assistant, and used Claude Code for the final cleanup, re-runs and write-up. I ran the notebooks and checked the numbers in this README against their outputs.
+
+## Data and attribution
+- Data: not included. Get it from Kaggle ("Epileptic Seizure Recognition") and follow the terms on its page. It is a reshaped copy of the dataset from: Andrzejak RG, Lehnertz K, Mormann F, Rieke C, David P, Elger CE (2001). Indications of nonlinear deterministic and finite-dimensional structures in time series of brain electrical activity: dependence on recording region and brain state. Physical Review E 64, 061907.
 
 ## Future work
 - More feature families (catch22, MiniROCKET) and boosting libraries (XGBoost, LightGBM), compared under the same rule.
