@@ -31,12 +31,15 @@ def fold_of_rows(dev, table, repeat):
     return dev["segment"].map(table.set_index("segment")[f"repeat_{repeat}"]).to_numpy()
 
 
-def make_group_fold_table(dev, group_of):
-    """Like make_fold_table, but whole groups of twin segments always sit in the same fold."""
+def make_group_fold_table(dev, group_of, seed=RANDOM_STATE):
+    """Like make_fold_table, but whole groups of twin segments always sit in the same fold.
+
+    seed: base shuffle seed (repeat r uses seed + r). The saved tables use the default.
+    """
     table = dev.groupby("segment")["y"].first().reset_index()
     table["group"] = table["segment"].map(group_of)
     for r in range(N_REPEATS):
-        skf = StratifiedGroupKFold(N_FOLDS, shuffle=True, random_state=RANDOM_STATE + r)
+        skf = StratifiedGroupKFold(N_FOLDS, shuffle=True, random_state=seed + r)
         fold = np.empty(len(table), dtype=int)
         for k, (_, val_idx) in enumerate(skf.split(table["segment"], table["y"], groups=table["group"])):
             fold[val_idx] = k
